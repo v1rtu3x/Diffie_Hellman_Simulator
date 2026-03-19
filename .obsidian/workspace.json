@@ -1,0 +1,203 @@
+{
+  "main": {
+    "id": "4ebd6680fe00c60f",
+    "type": "split",
+    "children": [
+      {
+        "id": "1a426d1a8a6d9023",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "84d4ee3178c44a09",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Planning/Process.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Process"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "9098131714c3d210",
+    "type": "split",
+    "children": [
+      {
+        "id": "ae8ea805dbb45b01",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "c6ea763c7f8d14cb",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "7b9a36ad51a343d4",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "1e2a64921fd101b5",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "4ab5c26775f4c8fd",
+    "type": "split",
+    "children": [
+      {
+        "id": "e41ccf68173cffc7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "1527030f453ef729",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "Planning/Process.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Process"
+            }
+          },
+          {
+            "id": "512e6aeb508c80ae",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "Planning/Process.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Process"
+            }
+          },
+          {
+            "id": "a255a8349f891bb2",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "ad1466360f95559b",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "a86b56fa968eb08e",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "Planning/Process.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Process"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "84d4ee3178c44a09",
+  "lastOpenFiles": [
+    "ESP32_FW/src/state_machine.cpp",
+    "ESP32_FW/include/state_machine.h",
+    "ESP32_FW/include/message_codec.h",
+    "ESP32_FW/include/transport_client.h",
+    "ESP32_FW/include/wifi_manager.h",
+    "ESP32_FW/include/types.h",
+    "ESP32_FW/include/config.h",
+    "ESP32_FW/include/protocol.h",
+    "ESP32_FW/src/event_reporter.cpp",
+    "ESP32_FW/src/message_codec.cpp",
+    "ESP32_FW/src/transport_client.cpp",
+    "Docs/Internal Documentation/Protocol_Reference.md",
+    "Readme.md",
+    "Planning/Process.md"
+  ]
+}
