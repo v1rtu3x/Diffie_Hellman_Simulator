@@ -10,13 +10,14 @@ void WiFiManager::begin() {
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(true, true);
-    delay(200);
+    delay(500);
 
     connectToWiFi();
 }
 
 void WiFiManager::update() {
-    bool connectedNow = isConnected();
+    wl_status_t status = WiFi.status();
+    bool connectedNow = (status == WL_CONNECTED);
 
     if (connectedNow && !wasConnected) {
         emitEvent("WIFI_CONNECTED");
@@ -26,11 +27,19 @@ void WiFiManager::update() {
 
     if (!connectedNow && wasConnected) {
         emitEvent("WIFI_DISCONNECTED");
-        Serial.println("[WiFi] Disconnected from hotspot");
+        Serial.print("[WiFi] Disconnected. Status code: ");
+        Serial.println(status);
     }
 
     if (!connectedNow) {
+        static unsigned long lastStatusPrint = 0;
         unsigned long now = millis();
+
+        if (now - lastStatusPrint >= 2000) {
+            lastStatusPrint = now;
+            Serial.print("[WiFi] Current status code: ");
+            Serial.println(status);
+        }
 
         if (now - lastRetryAttempt >= 5000) {
             lastRetryAttempt = now;
@@ -62,6 +71,8 @@ void WiFiManager::connectToWiFi() {
     emitEvent("WIFI_CONNECTING");
     Serial.print("[WiFi] Connecting to SSID: ");
     Serial.println(Config::WIFI_SSID);
+    Serial.print("[WiFi] SSID length: ");
+    Serial.println(strlen(Config::WIFI_SSID));
 
     WiFi.begin(Config::WIFI_SSID, Config::WIFI_PASSWORD);
 }

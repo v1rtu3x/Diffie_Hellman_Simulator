@@ -5,10 +5,12 @@
 #endif
 
 #define FIRMWARE_VERSION "1.0.0"
+#include <Arduino.h>
+#include "secrets.h"
 
 namespace Config {
-    static const char* WIFI_SSID = "YourLaptopHotspot";
-    static const char* WIFI_PASSWORD = "YourHotspotPassword";
-    static const char* BACKEND_IP = "192.168.137.1";
-    static const uint16_t BACKEND_PORT = 5000;
+    static const char* WIFI_SSID = S_WIFI_SSID;
+    static const char* WIFI_PASSWORD = S_WIFI_PASSWORD;
+    static const char* BACKEND_IP = "172.20.10.9";
+    static const uint16_t BACKEND_PORT = 5050;
 }
