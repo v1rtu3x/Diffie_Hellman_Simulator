@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from device_manager import DeviceManager
+import logger
 
 
 class BackendServer:
@@ -20,10 +21,18 @@ class BackendServer:
         )
 
         addr_list = ", ".join(str(sock.getsockname()) for sock in server.sockets or [])
-        print(f"[Server] Listening on {addr_list}")
+        logger.info(f"Server listening on {addr_list}")
+
+        # Periodic device monitor
+        asyncio.create_task(self.device_monitor())
 
         async with server:
             await server.serve_forever()
+
+    async def device_monitor(self):
+        while True:
+            self.device_manager.print_devices()
+            await asyncio.sleep(5)
 
     async def handle_client(
         self,
@@ -33,7 +42,7 @@ class BackendServer:
         peer = writer.get_extra_info("peername")
         addr = f"{peer[0]}:{peer[1]}" if peer else "unknown"
 
-        print(f"[Server] Client connected from {addr}")
+        logger.event("CONN", f"Client connected from {addr}")
 
         registered_device_id: Optional[str] = None
 
@@ -42,19 +51,19 @@ class BackendServer:
                 raw = await reader.readline()
 
                 if not raw:
-                    print(f"[Server] Client disconnected from {addr}")
+                    logger.event("DISCONNECT", f"Client disconnected from {addr}")
                     break
 
                 line = raw.decode(errors="replace").strip()
                 if not line:
                     continue
 
-                print(f"[RX] {addr} -> {line}")
+                logger.event("RX", f"{addr} -> {line}")
 
                 try:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
-                    print(f"[Server] Invalid JSON from {addr}")
+                    logger.warn(f"Malformed message from {addr}: {line}")
                     await self.send_json(
                         writer,
                         {
@@ -76,16 +85,16 @@ class BackendServer:
                     if registered_device_id:
                         self.device_manager.touch(registered_device_id)
 
-                    print(f"[Server] Unhandled message type: {msg_type}")
+                    logger.warn(f"Unhandled message type: {msg_type}")
 
         except ConnectionResetError:
-            print(f"[Server] Connection reset by {addr}")
+            logger.warn(f"Connection reset by {addr}")
         except asyncio.IncompleteReadError:
-            print(f"[Server] Incomplete read from {addr}")
+            logger.warn(f"Incomplete read from {addr}")
         finally:
             removed = self.device_manager.unregister_by_writer(writer)
             if removed:
-                print(f"[Server] Device removed: {removed}")
+                logger.event("DISCONNECT", f"Device removed: {removed}")
                 self.device_manager.print_devices()
 
             writer.close()
@@ -121,7 +130,8 @@ class BackendServer:
         )
 
         if not ok:
-            print(f"[Server] Registration rejected: {info}")
+            logger.warn(f"Registration rejected: {info}")
+
             await self.send_json(
                 writer,
                 {
@@ -132,10 +142,12 @@ class BackendServer:
                     "seq": seq,
                 },
             )
+
             writer.close()
             return False, None
 
-        print(f"[Server] {info}")
+        logger.event("REGISTER", f"{device_id} registered ({addr})")
+
         self.device_manager.print_devices()
 
         await self.send_json(
@@ -155,4 +167,5 @@ class BackendServer:
         line = json.dumps(payload) + "\n"
         writer.write(line.encode())
         await writer.drain()
-        print(f"[TX] {line.strip()}")
+
+        logger.event("TX", line.strip())

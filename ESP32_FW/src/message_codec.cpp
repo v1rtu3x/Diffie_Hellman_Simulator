@@ -15,6 +15,61 @@ String MessageCodec::makeRegisterMessage(const char* deviceId,
     msg += firmwareVersion;
     msg += "\"";
     msg += "}";
+    return msg;
+}
+
+ParsedMessage MessageCodec::parseMessage(const String& raw) {
+    ParsedMessage msg;
+    String typeStr;
+
+    extractStringField(raw, "type", typeStr);
+    extractStringField(raw, "session_id", msg.sessionId);
+    extractStringField(raw, "error_code", msg.errorCode);
+    extractStringField(raw, "device_id", msg.deviceId);
+    extractStringField(raw, "peer_device_id", msg.peerDeviceId);
+    extractUIntField(raw, "seq", msg.seq);
+    msg.hasP = extractUIntField(raw, "p", msg.p);
+    msg.hasG = extractUIntField(raw, "g", msg.g);
+    msg.hasPublicKey = extractUIntField(raw, "public_key", msg.publicKey);
+
+    if (typeStr == "REGISTER_ACK") msg.type = CommandType::REGISTER_ACK;
+    else if (typeStr == "SET_PARAMS") msg.type = CommandType::SET_PARAMS;
+    else if (typeStr == "START_EXCHANGE") msg.type = CommandType::START_EXCHANGE;
+    else if (typeStr == "PEER_PUBLIC_KEY") msg.type = CommandType::PEER_PUBLIC_KEY;
+    else if (typeStr == "RESET") msg.type = CommandType::RESET;
+    else if (typeStr == "ERROR") msg.type = CommandType::ERROR_MSG;
+    else msg.type = CommandType::UNKNOWN;
 
     return msg;
+}
+
+bool MessageCodec::extractStringField(const String& raw, const String& key, String& value) {
+    String pattern = "\"" + key + "\":\"";
+    int start = raw.indexOf(pattern);
+    if (start < 0) return false;
+
+    start += pattern.length();
+    int end = raw.indexOf("\"", start);
+    if (end < 0) return false;
+
+    value = raw.substring(start, end);
+    return true;
+}
+
+bool MessageCodec::extractUIntField(const String& raw, const String& key, uint32_t& value) {
+    String pattern = "\"" + key + "\":";
+    int start = raw.indexOf(pattern);
+    if (start < 0) return false;
+
+    start += pattern.length();
+    int end = start;
+
+    while (end < raw.length() && isDigit(raw[end])) {
+        end++;
+    }
+
+    if (end == start) return false;
+
+    value = raw.substring(start, end).toInt();
+    return true;
 }

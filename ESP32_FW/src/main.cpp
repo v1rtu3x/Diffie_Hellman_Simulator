@@ -3,39 +3,228 @@
 #include "../include/transport_client.h"
 #include "../include/message_codec.h"
 #include "../include/config.h"
+#include "../include/state_machine.h"
+#include "../include/app_context.h"
+#include "../include/event_reporter.h"
 
 WiFiManager wifiManager;
 TransportClient transportClient;
+StateMachine stateMachine;
+AppContext app;
 
-static uint32_t g_seq = 1;
-static bool registerSent = false;
-
-void handleIncomingMessage(const String& msg) {
-    Serial.print("[APP][RX] ");
-    Serial.println(msg);
-
-    if (msg.indexOf("\"type\":\"REGISTER_ACK\"") >= 0) {
-        Serial.println("[APP] REGISTER_ACK received");
+void sendEvent(const char* eventType, const String& data = "") {
+    if (!transportClient.isConnected()) {
+        return;
     }
+
+    String msg = EventReporter::buildEvent(
+        DEVICE_ID,
+        app.currentSessionId,
+        app.seq++,
+        stateMachine.getStateName(),
+        eventType,
+        data
+    );
+
+    transportClient.sendLine(msg);
+
+    Serial.print("[APP][EVENT] ");
+    Serial.println(msg);
+}
+
+void handleRegisterAck(const ParsedMessage& msg) {
+    Serial.println("[APP] REGISTER_ACK received");
+
+    app.registrationBlocked = false;
+
+    if (stateMachine.getState() == DeviceState::SERVER_CONNECTING) {
+        stateMachine.transitionTo(DeviceState::WAITING_PARAMS);
+    }
+
+    sendEvent("REGISTERED");
+}
+
+void handleSetParams(const ParsedMessage& msg) {
+    if (stateMachine.getState() != DeviceState::WAITING_PARAMS &&
+        stateMachine.getState() != DeviceState::DONE) {
+        Serial.println("[APP][ERROR] SET_PARAMS invalid state");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"SET_PARAMS invalid state\"}");
+        return;
+    }
+
+    if (!msg.hasP || !msg.hasG || msg.sessionId.length() == 0) {
+        Serial.println("[APP][ERROR] SET_PARAMS missing required fields");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"SET_PARAMS missing fields\"}");
+        return;
+    }
+
+    app.currentSessionId = msg.sessionId;
+    app.p = msg.p;
+    app.g = msg.g;
+    app.hasParams = true;
+
+    Serial.print("[APP] Session set: ");
+    Serial.println(app.currentSessionId);
+    Serial.print("[APP] p = ");
+    Serial.println(app.p);
+    Serial.print("[APP] g = ");
+    Serial.println(app.g);
+
+    stateMachine.transitionTo(DeviceState::READY);
+    sendEvent("PARAMS_RECEIVED");
+}
+
+void handleStartExchange(const ParsedMessage& msg) {
+    if (stateMachine.getState() != DeviceState::READY) {
+        Serial.println("[APP][ERROR] START_EXCHANGE invalid state");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"START_EXCHANGE invalid state\"}");
+        return;
+    }
+
+    if (msg.sessionId.length() == 0 || msg.sessionId != app.currentSessionId) {
+        Serial.println("[APP][ERROR] START_EXCHANGE session mismatch");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"START_EXCHANGE session mismatch\"}");
+        return;
+    }
+
+    Serial.println("[APP] START_EXCHANGE received");
+
+    stateMachine.transitionTo(DeviceState::GENERATING_PRIVATE);
+    sendEvent("GENERATING_PRIVATE");
+
+    // Placeholder for DH math in next milestone
+    stateMachine.transitionTo(DeviceState::COMPUTED_PUBLIC);
+    sendEvent("PUBLIC_KEY_COMPUTED");
+
+    stateMachine.transitionTo(DeviceState::WAITING_PEER_PUBLIC);
+    sendEvent("WAITING_PEER_PUBLIC");
+}
+
+void handlePeerPublicKey(const ParsedMessage& msg) {
+    if (stateMachine.getState() != DeviceState::WAITING_PEER_PUBLIC) {
+        Serial.println("[APP][ERROR] PEER_PUBLIC_KEY invalid state");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"PEER_PUBLIC_KEY invalid state\"}");
+        return;
+    }
+
+    if (msg.sessionId.length() == 0 || msg.sessionId != app.currentSessionId) {
+        Serial.println("[APP][ERROR] PEER_PUBLIC_KEY session mismatch");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"PEER_PUBLIC_KEY session mismatch\"}");
+        return;
+    }
+
+    if (!msg.hasPublicKey) {
+        Serial.println("[APP][ERROR] PEER_PUBLIC_KEY missing public_key");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"PEER_PUBLIC_KEY missing public_key\"}");
+        return;
+    }
+
+    Serial.print("[APP] Peer public key received: ");
+    Serial.println(msg.publicKey);
+
+    // Placeholder for shared secret calculation in next milestone
+    stateMachine.transitionTo(DeviceState::COMPUTED_SHARED_SECRET);
+    sendEvent("SHARED_SECRET_COMPUTED");
+
+    stateMachine.transitionTo(DeviceState::DONE);
+    sendEvent("DONE");
+}
+
+void handleReset(const ParsedMessage& msg) {
+    (void)msg;
+
+    Serial.println("[APP] RESET received");
+
+    app.resetSession();
+    app.registrationBlocked = false;
+
+    stateMachine.transitionTo(DeviceState::WAITING_PARAMS);
+    sendEvent("RESET_DONE");
+}
+
+void handleError(const ParsedMessage& msg) {
+    Serial.println("[APP] ERROR received from backend");
+
+    if (msg.errorCode == "DUPLICATE_DEVICE_ID") {
+        Serial.println("[APP] Duplicate device ID detected. Blocking re-registration.");
+        app.registrationBlocked = true;
+        sendEvent("ERROR", "{\"reason\":\"DUPLICATE_DEVICE_ID\"}");
+        return;
+    }
+
+    stateMachine.transitionTo(DeviceState::ERROR);
+    sendEvent("ERROR", "{\"reason\":\"backend error\"}");
+}
+
+void dispatchCommand(const ParsedMessage& msg) {
+    switch (msg.type) {
+        case CommandType::SET_PARAMS:
+            handleSetParams(msg);
+            break;
+
+        case CommandType::START_EXCHANGE:
+            handleStartExchange(msg);
+            break;
+
+        case CommandType::PEER_PUBLIC_KEY:
+            handlePeerPublicKey(msg);
+            break;
+
+        case CommandType::RESET:
+            handleReset(msg);
+            break;
+
+        case CommandType::REGISTER_ACK:
+            handleRegisterAck(msg);
+            break;
+
+        case CommandType::ERROR_MSG:
+            handleError(msg);
+            break;
+
+        case CommandType::UNKNOWN:
+        default:
+            Serial.println("[APP][WARN] Unknown command");
+            break;
+    }
+}
+
+void handleIncomingMessage(const String& raw) {
+    Serial.print("[APP][RX] ");
+    Serial.println(raw);
+
+    ParsedMessage msg = MessageCodec::parseMessage(raw);
+    dispatchCommand(msg);
 }
 
 void sendRegisterIfNeeded() {
     if (!transportClient.isConnected()) {
-        registerSent = false;
+        app.registerSent = false;
         return;
     }
 
-    if (!registerSent) {
+    if (app.registrationBlocked) {
+        return;
+    }
+
+    if (!app.registerSent) {
         String registerMsg = MessageCodec::makeRegisterMessage(
             DEVICE_ID,
             FIRMWARE_VERSION,
-            g_seq++
+            app.seq++
         );
 
         Serial.println("[APP] Sending REGISTER...");
         if (transportClient.sendLine(registerMsg)) {
             Serial.println("[APP] REGISTER sent successfully");
-            registerSent = true;
+            app.registerSent = true;
         } else {
             Serial.println("[APP] REGISTER send failed");
         }
@@ -49,6 +238,8 @@ void setup() {
     Serial.println();
     Serial.println("=== ESP32 DH Simulator Boot ===");
 
+    stateMachine.transitionTo(DeviceState::WIFI_CONNECTING);
+
     wifiManager.begin();
     transportClient.begin();
 }
@@ -57,6 +248,10 @@ void loop() {
     wifiManager.update();
 
     if (wifiManager.isConnected()) {
+        if (stateMachine.getState() == DeviceState::WIFI_CONNECTING) {
+            stateMachine.transitionTo(DeviceState::SERVER_CONNECTING);
+        }
+
         transportClient.update();
         sendRegisterIfNeeded();
 
@@ -65,7 +260,13 @@ void loop() {
             handleIncomingMessage(msg);
         }
     } else {
-        registerSent = false;
+        app.registerSent = false;
+        app.registrationBlocked = false;
+        app.resetSession();
+
+        if (stateMachine.getState() != DeviceState::WIFI_CONNECTING) {
+            stateMachine.transitionTo(DeviceState::WIFI_CONNECTING);
+        }
     }
 
     delay(100);
