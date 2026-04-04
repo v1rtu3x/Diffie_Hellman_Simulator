@@ -6,11 +6,13 @@
 #include "../include/state_machine.h"
 #include "../include/app_context.h"
 #include "../include/event_reporter.h"
+#include "../include/dh_engine.h"
 
 WiFiManager wifiManager;
 TransportClient transportClient;
 StateMachine stateMachine;
 AppContext app;
+DhEngine dhEngine;
 
 void sendEvent(const char* eventType, const String& data = "") {
     if (!transportClient.isConnected()) {
@@ -60,6 +62,13 @@ void handleSetParams(const ParsedMessage& msg) {
         return;
     }
 
+    if (!dhEngine.setParams(msg.p, msg.g)) {
+        Serial.println("[APP][ERROR] Failed to set DH params");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"invalid DH params\"}");
+        return;
+    }
+
     app.currentSessionId = msg.sessionId;
     app.p = msg.p;
     app.g = msg.g;
@@ -96,9 +105,47 @@ void handleStartExchange(const ParsedMessage& msg) {
     stateMachine.transitionTo(DeviceState::GENERATING_PRIVATE);
     sendEvent("GENERATING_PRIVATE");
 
-    // Placeholder for DH math in next milestone
+    if (!dhEngine.generatePrivateKey()) {
+        Serial.println("[APP][ERROR] Failed to generate private key");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"private key generation failed\"}");
+        return;
+    }
+
+    if (!dhEngine.computePublicKey()) {
+        Serial.println("[APP][ERROR] Failed to compute public key");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"public key computation failed\"}");
+        return;
+    }
+
+    const DhContext& ctx = dhEngine.getContext();
+
+    Serial.print("[APP] Private key: ");
+    Serial.println(ctx.privateKey);
+    Serial.print("[APP] Public key: ");
+    Serial.println(ctx.publicKey);
+
     stateMachine.transitionTo(DeviceState::COMPUTED_PUBLIC);
-    sendEvent("PUBLIC_KEY_COMPUTED");
+    sendEvent("PUBLIC_KEY_COMPUTED", "{\"public_key\":" + String(ctx.publicKey) + "}");
+
+    // Send PUBLIC_KEY to backend
+    String msgOut = "{";
+    msgOut += "\"type\":\"PUBLIC_KEY\",";
+    msgOut += "\"device_id\":\"";
+    msgOut += DEVICE_ID;
+    msgOut += "\",";
+    msgOut += "\"session_id\":\"";
+    msgOut += app.currentSessionId;
+    msgOut += "\",";
+    msgOut += "\"seq\":";
+    msgOut += String(app.seq++);
+    msgOut += ",";
+    msgOut += "\"public_key\":";
+    msgOut += String(ctx.publicKey);
+    msgOut += "}";
+
+    transportClient.sendLine(msgOut);
 
     stateMachine.transitionTo(DeviceState::WAITING_PEER_PUBLIC);
     sendEvent("WAITING_PEER_PUBLIC");
@@ -126,12 +173,47 @@ void handlePeerPublicKey(const ParsedMessage& msg) {
         return;
     }
 
-    Serial.print("[APP] Peer public key received: ");
-    Serial.println(msg.publicKey);
+    if (!dhEngine.setPeerPublicKey(msg.publicKey)) {
+        Serial.println("[APP][ERROR] Invalid peer public key");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"invalid peer public key\"}");
+        return;
+    }
 
-    // Placeholder for shared secret calculation in next milestone
+    if (!dhEngine.computeSharedSecret()) {
+        Serial.println("[APP][ERROR] Failed to compute shared secret");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"shared secret computation failed\"}");
+        return;
+    }
+
+    const DhContext& ctx = dhEngine.getContext();
+
+    Serial.print("[APP] Peer public key received: ");
+    Serial.println(ctx.peerPublicKey);
+    Serial.print("[APP] Shared secret: ");
+    Serial.println(ctx.sharedSecret);
+
     stateMachine.transitionTo(DeviceState::COMPUTED_SHARED_SECRET);
-    sendEvent("SHARED_SECRET_COMPUTED");
+    sendEvent("SHARED_SECRET_COMPUTED", "{\"shared_secret\":" + String(ctx.sharedSecret) + "}");
+
+    // Send RESULT to backend
+    String resultMsg = "{";
+    resultMsg += "\"type\":\"RESULT\",";
+    resultMsg += "\"device_id\":\"";
+    resultMsg += DEVICE_ID;
+    resultMsg += "\",";
+    resultMsg += "\"session_id\":\"";
+    resultMsg += app.currentSessionId;
+    resultMsg += "\",";
+    resultMsg += "\"seq\":";
+    resultMsg += String(app.seq++);
+    resultMsg += ",";
+    resultMsg += "\"shared_secret\":";
+    resultMsg += String(ctx.sharedSecret);
+    resultMsg += "}";
+
+    transportClient.sendLine(resultMsg);
 
     stateMachine.transitionTo(DeviceState::DONE);
     sendEvent("DONE");
@@ -144,6 +226,7 @@ void handleReset(const ParsedMessage& msg) {
 
     app.resetSession();
     app.registrationBlocked = false;
+    dhEngine.reset();
 
     stateMachine.transitionTo(DeviceState::WAITING_PARAMS);
     sendEvent("RESET_DONE");

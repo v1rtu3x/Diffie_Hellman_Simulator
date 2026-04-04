@@ -53,6 +53,9 @@ class DeviceManager:
 
     def list_devices(self) -> list[DeviceRecord]:
         return list(self.devices.values())
+    
+    def has_required_devices(self) -> bool:
+        return "ESP32-A" in self.devices and "ESP32-B" in self.devices  
 
     def print_devices(self) -> None:
         print("\n[DeviceManager] Connected devices:")
@@ -65,4 +68,4 @@ class DeviceManager:
                 f"  - {record.device_id} | {record.addr} | "
                 f"state={record.state} | last_seen={record.last_seen.isoformat()} | "
                 f"firmware={record.firmware_version}"
-            )
+            ) 

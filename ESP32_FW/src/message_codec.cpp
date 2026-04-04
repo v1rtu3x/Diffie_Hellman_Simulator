@@ -44,12 +44,24 @@ ParsedMessage MessageCodec::parseMessage(const String& raw) {
 }
 
 bool MessageCodec::extractStringField(const String& raw, const String& key, String& value) {
-    String pattern = "\"" + key + "\":\"";
-    int start = raw.indexOf(pattern);
-    if (start < 0) return false;
+    String pattern = "\"" + key + "\"";
+    int keyPos = raw.indexOf(pattern);
+    if (keyPos < 0) return false;
 
-    start += pattern.length();
-    int end = raw.indexOf("\"", start);
+    int colonPos = raw.indexOf(':', keyPos + pattern.length());
+    if (colonPos < 0) return false;
+
+    int start = colonPos + 1;
+    while (start < raw.length() && isspace(raw[start])) {
+        start++;
+    }
+
+    if (start >= raw.length() || raw[start] != '"') {
+        return false;
+    }
+
+    start++;  // move past opening quote
+    int end = raw.indexOf('"', start);
     if (end < 0) return false;
 
     value = raw.substring(start, end);
@@ -57,13 +69,19 @@ bool MessageCodec::extractStringField(const String& raw, const String& key, Stri
 }
 
 bool MessageCodec::extractUIntField(const String& raw, const String& key, uint32_t& value) {
-    String pattern = "\"" + key + "\":";
-    int start = raw.indexOf(pattern);
-    if (start < 0) return false;
+    String pattern = "\"" + key + "\"";
+    int keyPos = raw.indexOf(pattern);
+    if (keyPos < 0) return false;
 
-    start += pattern.length();
+    int colonPos = raw.indexOf(':', keyPos + pattern.length());
+    if (colonPos < 0) return false;
+
+    int start = colonPos + 1;
+    while (start < raw.length() && isspace(raw[start])) {
+        start++;
+    }
+
     int end = start;
-
     while (end < raw.length() && isDigit(raw[end])) {
         end++;
     }

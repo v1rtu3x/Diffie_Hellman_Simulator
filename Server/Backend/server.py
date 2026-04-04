@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from device_manager import DeviceManager
+from dhsession import DHSession
 import logger
 
 
@@ -12,6 +13,7 @@ class BackendServer:
         self.host = host
         self.port = port
         self.device_manager = DeviceManager()
+        self.session = DHSession("test-session", 23, 5)
 
     async def start(self) -> None:
         server = await asyncio.start_server(
@@ -81,6 +83,22 @@ class BackendServer:
                     ok, registered_device_id = await self.handle_register(msg, writer, addr)
                     if not ok:
                         break
+
+                elif msg_type == "PUBLIC_KEY":
+                    if registered_device_id:
+                        self.device_manager.touch(registered_device_id)
+                    await self.handle_public_key(msg)
+
+                elif msg_type == "RESULT":
+                    if registered_device_id:
+                        self.device_manager.touch(registered_device_id)
+                    await self.handle_result(msg)
+
+                elif msg_type == "EVENT":
+                    if registered_device_id:
+                        self.device_manager.touch(registered_device_id)
+                    logger.event("EVENT", f"{addr} -> {line}")
+
                 else:
                     if registered_device_id:
                         self.device_manager.touch(registered_device_id)
@@ -96,6 +114,7 @@ class BackendServer:
             if removed:
                 logger.event("DISCONNECT", f"Device removed: {removed}")
                 self.device_manager.print_devices()
+                self.session.reset_runtime_data()
 
             writer.close()
             await writer.wait_closed()
@@ -161,7 +180,124 @@ class BackendServer:
             },
         )
 
+        self.session.mark_ready(device_id)
+        self.session.status = "READY_WAIT"
+
+        await self.maybe_start_test_session()
+
         return True, device_id
+    
+    async def maybe_start_test_session(self) -> None:
+        if self.session.status != "READY_WAIT":
+            return
+
+        if not self.device_manager.has_required_devices():
+            return
+
+        if not self.session.is_ready():
+            return
+
+        logger.info("Both ESP32-A and ESP32-B are connected. Starting test session.")
+
+        self.session.status = "PARAMS_SENT"
+
+        await self.broadcast_json(
+            {
+                "type": "SET_PARAMS",
+                "session_id": self.session.session_id,
+                "p": self.session.p,
+                "g": self.session.g,
+            }
+        )
+
+        await asyncio.sleep(1)
+
+        self.session.status = "EXCHANGE_STARTED"
+
+        await self.broadcast_json(
+            {
+                "type": "START_EXCHANGE",
+                "session_id": self.session.session_id,
+            }
+        )
+
+    async def broadcast_json(self, payload: dict) -> None:
+        for record in self.device_manager.list_devices():
+            await self.send_json(record.writer, payload)
+
+    async def handle_public_key(self, msg: dict) -> None:
+        device_id = msg.get("device_id")
+        session_id = msg.get("session_id")
+        public_key = msg.get("public_key")
+
+        if not device_id or not session_id or public_key is None:
+            logger.warn(f"Invalid PUBLIC_KEY message: {msg}")
+            return
+
+        if session_id != self.session.session_id:
+            logger.warn(f"Ignoring PUBLIC_KEY for stale session: {session_id}")
+            return
+
+        self.session.add_public_key(device_id, public_key)
+        self.session.status = "COLLECTING_PUBLIC_KEYS"
+
+        logger.event("PUBLIC_KEY", f"{device_id} -> {public_key}")
+
+        if self.session.has_both_public_keys():
+            logger.info("Both public keys received. Relaying peer keys.")
+            self.session.status = "RELaying_PUBLIC_KEYS"
+
+            dev_a = self.device_manager.get_device("ESP32-A")
+            dev_b = self.device_manager.get_device("ESP32-B")
+
+            if dev_a and dev_b:
+                await self.send_json(
+                    dev_a.writer,
+                    {
+                        "type": "PEER_PUBLIC_KEY",
+                        "session_id": self.session.session_id,
+                        "peer_device_id": "ESP32-B",
+                        "public_key": self.session.public_keys["ESP32-B"],
+                    },
+                )
+
+                await self.send_json(
+                    dev_b.writer,
+                    {
+                        "type": "PEER_PUBLIC_KEY",
+                        "session_id": self.session.session_id,
+                        "peer_device_id": "ESP32-A",
+                        "public_key": self.session.public_keys["ESP32-A"],
+                    },
+                )
+
+    async def handle_result(self, msg: dict) -> None:
+        device_id = msg.get("device_id")
+        session_id = msg.get("session_id")
+        shared_secret = msg.get("shared_secret")
+
+        if not device_id or not session_id or shared_secret is None:
+            logger.warn(f"Invalid RESULT message: {msg}")
+            return
+
+        if session_id != self.session.session_id:
+            logger.warn(f"Ignoring RESULT for stale session: {session_id}")
+            return
+
+        self.session.add_result(device_id, shared_secret)
+        self.session.status = "COLLECTING_RESULTS"
+
+        logger.event("RESULT", f"{device_id} -> {shared_secret}")
+
+        if self.session.has_both_results():
+            if self.session.verify():
+                self.session.status = "VERIFIED_OK"
+                logger.info(f"Shared secret match: {shared_secret}")
+            else:
+                self.session.status = "VERIFIED_FAIL"
+                a_secret = self.session.results.get("ESP32-A")
+                b_secret = self.session.results.get("ESP32-B")
+                logger.error(f"Shared secret mismatch: A={a_secret}, B={b_secret}")
 
     async def send_json(self, writer: asyncio.StreamWriter, payload: dict) -> None:
         line = json.dumps(payload) + "\n"
@@ -169,3 +305,4 @@ class BackendServer:
         await writer.drain()
 
         logger.event("TX", line.strip())
+        
