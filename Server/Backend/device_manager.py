@@ -69,3 +69,11 @@ class DeviceManager:
                 f"state={record.state} | last_seen={record.last_seen.isoformat()} | "
                 f"firmware={record.firmware_version}"
             ) 
+            
+    def update_device_state(self, device_id: str, state: str, session_id: Optional[str] = None) -> None:
+        record = self.devices.get(device_id)
+        if record:
+            record.state = state
+            if session_id is not None:
+                record.session_id = session_id
+            record.touch()

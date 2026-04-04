@@ -5,10 +5,10 @@ class DHSession:
         self.g = g
 
         self.devices_ready = set()
-        self.public_keys = {}     # device_id -> key
-        self.results = {}         # device_id -> secret
+        self.public_keys = {}
+        self.results = {}
 
-        self.status = "INIT"
+        self.status = "IDLE"
 
     def mark_ready(self, device_id):
         self.devices_ready.add(device_id)
@@ -36,4 +36,8 @@ class DHSession:
         self.devices_ready.clear()
         self.public_keys.clear()
         self.results.clear()
-        self.status = "INIT"
+        self.status = "IDLE"
+
+    def set_params(self, p, g):
+        self.p = p
+        self.g = g
