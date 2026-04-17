@@ -1,2 +1,16 @@
-/Planning
-.obsidian
+ -----------------------------
+# Project folders (yours)
+# -----------------------------
+/Planning/
+/Docs/
+/.obsidian/
+
+# -----------------------------
+# Python (Backend)
+# -----------------------------
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+

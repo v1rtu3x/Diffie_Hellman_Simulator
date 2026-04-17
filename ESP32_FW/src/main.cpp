@@ -14,6 +14,12 @@ StateMachine stateMachine;
 AppContext app;
 DhEngine dhEngine;
 
+unsigned long waitingForPeerKeySinceMs = 0;
+const unsigned long PEER_KEY_TIMEOUT_MS = 10000;
+
+unsigned long lastHeartbeatMs = 0;
+const unsigned long HEARTBEAT_INTERVAL_MS = 3000;
+
 void sendEvent(const char* eventType, const String& data = "") {
     if (!transportClient.isConnected()) {
         return;
@@ -34,12 +40,25 @@ void sendEvent(const char* eventType, const String& data = "") {
     Serial.println(msg);
 }
 
+void sendHeartbeatIfNeeded() {
+    if (!transportClient.isConnected()) return;
+
+    unsigned long now = millis();
+    if (now - lastHeartbeatMs < HEARTBEAT_INTERVAL_MS) return;
+
+    lastHeartbeatMs = now;
+    sendEvent("HEARTBEAT");
+}
+
 void handleRegisterAck(const ParsedMessage& msg) {
+    (void)msg;
+
     Serial.println("[APP] REGISTER_ACK received");
 
     app.registrationBlocked = false;
 
-    if (stateMachine.getState() == DeviceState::SERVER_CONNECTING) {
+    if (stateMachine.getState() == DeviceState::SERVER_CONNECTING ||
+        stateMachine.getState() == DeviceState::ERROR) {
         stateMachine.transitionTo(DeviceState::WAITING_PARAMS);
     }
 
@@ -51,21 +70,21 @@ void handleSetParams(const ParsedMessage& msg) {
         stateMachine.getState() != DeviceState::DONE) {
         Serial.println("[APP][ERROR] SET_PARAMS invalid state");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"SET_PARAMS invalid state\"}");
+        sendEvent("ERROR", "{\"reason\":\"INVALID_STATE\",\"detail\":\"SET_PARAMS invalid state\"}");
         return;
     }
 
     if (!msg.hasP || !msg.hasG || msg.sessionId.length() == 0) {
         Serial.println("[APP][ERROR] SET_PARAMS missing required fields");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"SET_PARAMS missing fields\"}");
+        sendEvent("ERROR", "{\"reason\":\"MISSING_PARAMS\",\"detail\":\"SET_PARAMS missing fields\"}");
         return;
     }
 
     if (!dhEngine.setParams(msg.p, msg.g)) {
         Serial.println("[APP][ERROR] Failed to set DH params");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"invalid DH params\"}");
+        sendEvent("ERROR", "{\"reason\":\"INVALID_PARAMS\",\"detail\":\"invalid DH params\"}");
         return;
     }
 
@@ -89,14 +108,21 @@ void handleStartExchange(const ParsedMessage& msg) {
     if (stateMachine.getState() != DeviceState::READY) {
         Serial.println("[APP][ERROR] START_EXCHANGE invalid state");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"START_EXCHANGE invalid state\"}");
+        sendEvent("ERROR", "{\"reason\":\"INVALID_STATE\",\"detail\":\"START_EXCHANGE invalid state\"}");
+        return;
+    }
+
+    if (!app.hasParams) {
+        Serial.println("[APP][ERROR] START_EXCHANGE missing params");
+        stateMachine.transitionTo(DeviceState::ERROR);
+        sendEvent("ERROR", "{\"reason\":\"MISSING_PARAMS\",\"detail\":\"params not set\"}");
         return;
     }
 
     if (msg.sessionId.length() == 0 || msg.sessionId != app.currentSessionId) {
         Serial.println("[APP][ERROR] START_EXCHANGE session mismatch");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"START_EXCHANGE session mismatch\"}");
+        sendEvent("ERROR", "{\"reason\":\"SESSION_MISMATCH\",\"detail\":\"START_EXCHANGE session mismatch\"}");
         return;
     }
 
@@ -108,14 +134,14 @@ void handleStartExchange(const ParsedMessage& msg) {
     if (!dhEngine.generatePrivateKey()) {
         Serial.println("[APP][ERROR] Failed to generate private key");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"private key generation failed\"}");
+        sendEvent("ERROR", "{\"reason\":\"PRIVATE_KEY_FAILED\",\"detail\":\"private key generation failed\"}");
         return;
     }
 
     if (!dhEngine.computePublicKey()) {
         Serial.println("[APP][ERROR] Failed to compute public key");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"public key computation failed\"}");
+        sendEvent("ERROR", "{\"reason\":\"PUBLIC_KEY_FAILED\",\"detail\":\"public key computation failed\"}");
         return;
     }
 
@@ -129,7 +155,6 @@ void handleStartExchange(const ParsedMessage& msg) {
     stateMachine.transitionTo(DeviceState::COMPUTED_PUBLIC);
     sendEvent("PUBLIC_KEY_COMPUTED", "{\"public_key\":" + String(ctx.publicKey) + "}");
 
-    // Send PUBLIC_KEY to backend
     String msgOut = "{";
     msgOut += "\"type\":\"PUBLIC_KEY\",";
     msgOut += "\"device_id\":\"";
@@ -149,43 +174,46 @@ void handleStartExchange(const ParsedMessage& msg) {
 
     stateMachine.transitionTo(DeviceState::WAITING_PEER_PUBLIC);
     sendEvent("WAITING_PEER_PUBLIC");
+    waitingForPeerKeySinceMs = millis();
 }
 
 void handlePeerPublicKey(const ParsedMessage& msg) {
     if (stateMachine.getState() != DeviceState::WAITING_PEER_PUBLIC) {
         Serial.println("[APP][ERROR] PEER_PUBLIC_KEY invalid state");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"PEER_PUBLIC_KEY invalid state\"}");
+        sendEvent("ERROR", "{\"reason\":\"INVALID_STATE\",\"detail\":\"PEER_PUBLIC_KEY invalid state\"}");
         return;
     }
 
     if (msg.sessionId.length() == 0 || msg.sessionId != app.currentSessionId) {
         Serial.println("[APP][ERROR] PEER_PUBLIC_KEY session mismatch");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"PEER_PUBLIC_KEY session mismatch\"}");
+        sendEvent("ERROR", "{\"reason\":\"SESSION_MISMATCH\",\"detail\":\"PEER_PUBLIC_KEY session mismatch\"}");
         return;
     }
 
     if (!msg.hasPublicKey) {
         Serial.println("[APP][ERROR] PEER_PUBLIC_KEY missing public_key");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"PEER_PUBLIC_KEY missing public_key\"}");
+        sendEvent("ERROR", "{\"reason\":\"MISSING_PEER_KEY\",\"detail\":\"PEER_PUBLIC_KEY missing public_key\"}");
         return;
     }
 
     if (!dhEngine.setPeerPublicKey(msg.publicKey)) {
         Serial.println("[APP][ERROR] Invalid peer public key");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"invalid peer public key\"}");
+        sendEvent("ERROR", "{\"reason\":\"INVALID_PEER_KEY\",\"detail\":\"invalid peer public key\"}");
         return;
     }
 
     if (!dhEngine.computeSharedSecret()) {
         Serial.println("[APP][ERROR] Failed to compute shared secret");
         stateMachine.transitionTo(DeviceState::ERROR);
-        sendEvent("ERROR", "{\"reason\":\"shared secret computation failed\"}");
+        sendEvent("ERROR", "{\"reason\":\"SHARED_SECRET_FAILED\",\"detail\":\"shared secret computation failed\"}");
         return;
     }
+
+    waitingForPeerKeySinceMs = 0;
 
     const DhContext& ctx = dhEngine.getContext();
 
@@ -197,7 +225,6 @@ void handlePeerPublicKey(const ParsedMessage& msg) {
     stateMachine.transitionTo(DeviceState::COMPUTED_SHARED_SECRET);
     sendEvent("SHARED_SECRET_COMPUTED", "{\"shared_secret\":" + String(ctx.sharedSecret) + "}");
 
-    // Send RESULT to backend
     String resultMsg = "{";
     resultMsg += "\"type\":\"RESULT\",";
     resultMsg += "\"device_id\":\"";
@@ -227,6 +254,7 @@ void handleReset(const ParsedMessage& msg) {
     app.resetSession();
     app.registrationBlocked = false;
     dhEngine.reset();
+    waitingForPeerKeySinceMs = 0;
 
     stateMachine.transitionTo(DeviceState::WAITING_PARAMS);
     sendEvent("RESET_DONE");
@@ -243,7 +271,7 @@ void handleError(const ParsedMessage& msg) {
     }
 
     stateMachine.transitionTo(DeviceState::ERROR);
-    sendEvent("ERROR", "{\"reason\":\"backend error\"}");
+    sendEvent("ERROR", "{\"reason\":\"BACKEND_ERROR\",\"detail\":\"backend error\"}");
 }
 
 void dispatchCommand(const ParsedMessage& msg) {
@@ -251,30 +279,25 @@ void dispatchCommand(const ParsedMessage& msg) {
         case CommandType::SET_PARAMS:
             handleSetParams(msg);
             break;
-
         case CommandType::START_EXCHANGE:
             handleStartExchange(msg);
             break;
-
         case CommandType::PEER_PUBLIC_KEY:
             handlePeerPublicKey(msg);
             break;
-
         case CommandType::RESET:
             handleReset(msg);
             break;
-
         case CommandType::REGISTER_ACK:
             handleRegisterAck(msg);
             break;
-
         case CommandType::ERROR_MSG:
             handleError(msg);
             break;
-
         case CommandType::UNKNOWN:
         default:
             Serial.println("[APP][WARN] Unknown command");
+            sendEvent("ERROR", "{\"reason\":\"UNKNOWN_COMMAND\"}");
             break;
     }
 }
@@ -284,6 +307,14 @@ void handleIncomingMessage(const String& raw) {
     Serial.println(raw);
 
     ParsedMessage msg = MessageCodec::parseMessage(raw);
+
+    if (!msg.parseOk) {
+        Serial.print("[APP][ERROR] Malformed message: ");
+        Serial.println(msg.parseError);
+        sendEvent("ERROR", "{\"reason\":\"INVALID_JSON\"}");
+        return;
+    }
+
     dispatchCommand(msg);
 }
 
@@ -336,21 +367,56 @@ void loop() {
         }
 
         transportClient.update();
+
+        if (!transportClient.isConnected()) {
+            if (stateMachine.getState() != DeviceState::SERVER_CONNECTING &&
+                stateMachine.getState() != DeviceState::WIFI_CONNECTING) {
+
+                Serial.println("[APP][WARN] Backend disconnected during session, resetting local DH state");
+                sendEvent("ERROR", "{\"reason\":\"BACKEND_DISCONNECTED\"}");
+
+                app.resetSession();
+                dhEngine.reset();
+                waitingForPeerKeySinceMs = 0;
+                app.registerSent = false;
+                stateMachine.transitionTo(DeviceState::SERVER_CONNECTING);
+            }
+        }
+
         sendRegisterIfNeeded();
 
         while (transportClient.hasMessage()) {
             String msg = transportClient.popMessage();
             handleIncomingMessage(msg);
         }
+
+        sendHeartbeatIfNeeded();
+
+        if (stateMachine.getState() == DeviceState::WAITING_PEER_PUBLIC) {
+            unsigned long now = millis();
+            if (waitingForPeerKeySinceMs != 0 &&
+                now - waitingForPeerKeySinceMs >= PEER_KEY_TIMEOUT_MS) {
+
+                Serial.println("[APP][ERROR] Timed out waiting for peer public key");
+                sendEvent("ERROR", "{\"reason\":\"PEER_KEY_TIMEOUT\"}");
+
+                app.resetSession();
+                dhEngine.reset();
+                waitingForPeerKeySinceMs = 0;
+                stateMachine.transitionTo(DeviceState::WAITING_PARAMS);
+            }
+        }
     } else {
         app.registerSent = false;
         app.registrationBlocked = false;
         app.resetSession();
+        dhEngine.reset();
+        waitingForPeerKeySinceMs = 0;
 
         if (stateMachine.getState() != DeviceState::WIFI_CONNECTING) {
             stateMachine.transitionTo(DeviceState::WIFI_CONNECTING);
         }
     }
 
-    delay(100);
+    delay(1);
 }

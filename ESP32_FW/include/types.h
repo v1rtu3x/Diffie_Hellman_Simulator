@@ -28,17 +28,22 @@ enum class CommandType {
 
 struct ParsedMessage {
     CommandType type = CommandType::UNKNOWN;
-    String sessionId = "";
-    String errorCode = "";
+
+    String rawType = "";
     String deviceId = "";
+    String sessionId = "";
+    String peerDeviceId = "";
+    String errorCode = "";
+
     uint32_t seq = 0;
+    uint32_t p = 0;
+    uint32_t g = 0;
+    uint32_t publicKey = 0;
 
     bool hasP = false;
     bool hasG = false;
-    uint32_t p = 0;
-    uint32_t g = 0;
-
     bool hasPublicKey = false;
-    uint32_t publicKey = 0;
-    String peerDeviceId = "";
+
+    bool parseOk = false;
+    String parseError = "";
 };

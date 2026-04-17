@@ -1,13 +1,18 @@
 function DeviceCard({ title, device, fallbackSessionId }) {
   const connected = Boolean(device);
+  const health = device?.heartbeat_health || "offline";
+  const offline = !connected || health === "offline";
 
   return (
     <div className="panel device-card">
       <h2>{title}</h2>
 
       <div className="device-row">
-        <span className={`badge ${connected ? "ok" : "off"}`}>
-          {connected ? "Connected" : "Offline"}
+        <span className={`badge ${connected && !offline ? "ok" : "off"}`}>
+          {connected && !offline ? "Connected" : "Offline"}
+        </span>
+        <span style={{ marginLeft: 8 }}>
+          Heartbeat: <strong>{health}</strong>
         </span>
       </div>
 
@@ -22,6 +27,12 @@ function DeviceCard({ title, device, fallbackSessionId }) {
       ) : (
         <div className="device-details">
           <div><strong>State:</strong> OFFLINE</div>
+        </div>
+      )}
+
+      {offline && (
+        <div style={{ marginTop: 12, color: "#991b1b", fontWeight: 700 }}>
+          No recent heartbeat. Check power, hotspot, or backend.
         </div>
       )}
     </div>

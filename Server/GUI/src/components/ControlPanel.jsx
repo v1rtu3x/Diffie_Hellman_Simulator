@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { startSession, resetSession } from "../api";
 
-export default function ControlPanel() {
+export default function ControlPanel({ readyToStart }) {
   const [p, setP] = useState(23);
   const [g, setG] = useState(5);
   const [busy, setBusy] = useState(false);
@@ -52,9 +52,19 @@ export default function ControlPanel() {
       </div>
 
       <div className="control-actions">
-        <button onClick={handleStart} disabled={busy}>Start Session</button>
-        <button onClick={handleReset} disabled={busy} className="secondary">Reset Session</button>
+        <button onClick={handleStart} disabled={busy || !readyToStart}>
+          Start Session
+        </button>
+        <button onClick={handleReset} disabled={busy} className="secondary">
+          Reset Session
+        </button>
       </div>
+
+      {!readyToStart && (
+        <div style={{ marginTop: 12, color: "#b45309" }}>
+          Waiting for both devices to be healthy before starting.
+        </div>
+      )}
 
       {status && <div style={{ marginTop: 12 }}>{status}</div>}
     </div>
