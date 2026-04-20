@@ -2,8 +2,9 @@
 # Project folders (yours)
 # -----------------------------
 /Planning/
-/Docs/
 /.obsidian/
+/GUI Pictures/
+/Board Pictures/
 
 # -----------------------------
 # Python (Backend)
@@ -14,3 +15,4 @@ __pycache__/
 *.pyo
 *.pyd
 
+Project Documentation.pdf
